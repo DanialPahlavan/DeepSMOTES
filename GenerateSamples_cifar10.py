@@ -1,37 +1,27 @@
-# -*- coding: utf-8 -*-
-
 import collections
 import torch
 import torch.nn as nn
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 import os
-from save_images import save_image_from_array
-print(torch.version.cuda) #10.1
 import time
+import matplotlib.pyplot as plt
+
+print(f"CUDA version: {torch.version.cuda}")
 t0 = time.time()
+
 ##############################################################################
 """args for models"""
 
 args = {}
 args['dim_h'] = 64          # factor controlling size of hidden layers
 args['n_channel'] = 3       # number of channels in the input data 
-
-args['n_z'] = 300 #600     # number of dimensions in latent space. 
-
-args['sigma'] = 1.0        # variance in n_z
-args['lambda'] = 0.01      # hyper param for weight of discriminator loss
-args['lr'] = 0.0002        # learning rate for Adam optimizer .000
-args['epochs'] = 1 #50         # how many epochs to run for
-args['batch_size'] = 100   # batch size for SGD
-args['save'] = True        # save weights at each epoch of training if True
-args['train'] = True       # train networks if True, else load networks from
-
-args['dataset'] = 'cifar10' #'fmnist' # specify which dataset to use
+args['n_z'] = 300           # number of dimensions in latent space
+args['dataset'] = 'cifar10' # specify which dataset to use
 
 ##############################################################################
 
-## create encoder model and decoder model
+# Same fixed encoder and decoder classes as in training
 class Encoder(nn.Module):
     def __init__(self, args):
         super(Encoder, self).__init__()
@@ -40,48 +30,26 @@ class Encoder(nn.Module):
         self.dim_h = args['dim_h']
         self.n_z = args['n_z']
         
-        # convolutional filters, work excellent with image data
         self.conv = nn.Sequential(
             nn.Conv2d(self.n_channel, self.dim_h, 4, 2, 1, bias=False),
-            #nn.ReLU(True),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(self.dim_h, self.dim_h * 2, 4, 2, 1, bias=False),
             nn.BatchNorm2d(self.dim_h * 2),
-            #nn.ReLU(True),
             nn.LeakyReLU(0.2, inplace=True),
             nn.Conv2d(self.dim_h * 2, self.dim_h * 4, 4, 2, 1, bias=False),
             nn.BatchNorm2d(self.dim_h * 4),
-            #nn.ReLU(True),
             nn.LeakyReLU(0.2, inplace=True),
-
-
             nn.Conv2d(self.dim_h * 4, self.dim_h * 8, 4, 2, 1, bias=False),
-
-            #3d and 32 by 32
-            #nn.Conv2d(self.dim_h * 4, self.dim_h * 8, 4, 1, 0, bias=False),
-
-            nn.BatchNorm2d(self.dim_h * 8), # 40 X 8 = 320
-            #nn.ReLU(True),
-            nn.LeakyReLU(0.2, inplace=True) )
+            nn.BatchNorm2d(self.dim_h * 8),
+            nn.LeakyReLU(0.2, inplace=True)
+        )
         
         self.fc = nn.Linear(self.dim_h * 8 * 2 * 2, self.n_z)
-        
 
     def forward(self, x):
-        #print('enc')
-        #print('input ',x.size()) #torch.Size([100, 3,32,32])
         x = self.conv(x)
-        #print('aft conv ',x.size()) #torch.Size([100, 320, 2, 2]) with 
-        #nn.Conv2d(self.dim_h * 4, self.dim_h * 8, 4, 2, 1, bias=False),
-        #vs torch.Size([128, 320, 1, 1])
-        #aft conv  torch.Size([100, 320, 1, 1]) with 
-        #nn.Conv2d(self.dim_h * 4, self.dim_h * 8, 4, 1, 0, bias=False),
         x = x.view(x.size(0), -1)
-        #print('aft squeeze ',x.size()) #torch.Size([128, 320])
-        #aft squeeze  torch.Size([100, 320])
         x = self.fc(x)
-        #print('out ',x.size()) #torch.Size([128, 20])
-        #out  torch.Size([100, 300])
         return x
 
 
@@ -93,12 +61,11 @@ class Decoder(nn.Module):
         self.dim_h = args['dim_h']
         self.n_z = args['n_z']
 
-        # first layer is fully connected
         self.fc = nn.Sequential(
             nn.Linear(self.n_z, self.dim_h * 8 * 4 * 4),
-            nn.ReLU())
+            nn.ReLU()
+        )
 
-        # deconvolutional filters, essentially inverse of convolutional filters
         self.deconv = nn.Sequential(
             nn.ConvTranspose2d(self.dim_h * 8, self.dim_h * 4, 4, 2, 1),
             nn.BatchNorm2d(self.dim_h * 4),
@@ -107,12 +74,10 @@ class Decoder(nn.Module):
             nn.BatchNorm2d(self.dim_h * 2),
             nn.ReLU(True),
             nn.ConvTranspose2d(self.dim_h * 2, self.n_channel, 4, 2, 1),
-            #nn.Sigmoid())
-            nn.Tanh())
+            nn.Tanh()
+        )
 
     def forward(self, x):
-        #print('dec')
-        #print('input ',x.size())
         x = self.fc(x)
         x = x.view(-1, self.dim_h * 8, 4, 4)
         x = self.deconv(x)
@@ -121,184 +86,243 @@ class Decoder(nn.Module):
 ##############################################################################
 
 def biased_get_class1(c):
-    
+    """Get samples belonging to class c"""
     xbeg = dec_x[dec_y == c]
     ybeg = dec_y[dec_y == c]
-    
     return xbeg, ybeg
-    #return xclass, yclass
 
-
-def G_SM1(X, y,n_to_sample,cl):
-
-    
-    # fitting the model
+def G_SM1(X, y, n_to_sample, cl):
+    """Generate SMOTE samples in latent space"""
+    # Fit nearest neighbors
     n_neigh = 5 + 1
     nn = NearestNeighbors(n_neighbors=n_neigh, n_jobs=1)
     nn.fit(X)
     dist, ind = nn.kneighbors(X)
 
-    # generating samples
-    base_indices = np.random.choice(list(range(len(X))),n_to_sample)
-    neighbor_indices = np.random.choice(list(range(1, n_neigh)),n_to_sample)
+    # Generate samples
+    base_indices = np.random.choice(list(range(len(X))), n_to_sample)
+    neighbor_indices = np.random.choice(list(range(1, n_neigh)), n_to_sample)
 
     X_base = X[base_indices]
     X_neighbor = X[ind[base_indices, neighbor_indices]]
 
-    samples = X_base + np.multiply(np.random.rand(n_to_sample,1),
-            X_neighbor - X_base)
+    # SMOTE interpolation
+    samples = X_base + np.multiply(np.random.rand(n_to_sample, 1),
+                                   X_neighbor - X_base)
 
-    #use 10 as label because 0 to 9 real classes and 1 fake/smoted = 10
-    return samples, [cl]*n_to_sample
+    return samples, [cl] * n_to_sample
+
+def save_image_from_array(image_array, filename, output_dir="generated_images"):
+    """Save image array as PNG file"""
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
+    # Handle different image formats
+    if len(image_array.shape) == 3 and image_array.shape[0] in [1, 3]:
+        image_array = image_array.transpose((1, 2, 0))
+    
+    if len(image_array.shape) == 3 and image_array.shape[2] == 1:
+        image_array = image_array.squeeze(axis=2)
+    
+    # Denormalize from [-1, 1] to [0, 1]
+    if image_array.min() < 0:
+        image_array = (image_array + 1) / 2
+    
+    # Clip values to [0, 1]
+    image_array = np.clip(image_array, 0, 1)
+
+    plt.figure(figsize=(4, 4))
+    plt.imshow(image_array, cmap='gray' if len(image_array.shape) == 2 else None)
+    plt.axis('off')
+    plt.savefig(os.path.join(output_dir, filename), bbox_inches='tight', pad_inches=0)
+    plt.close()
 
 #############################################################################
-np.printoptions(precision=5,suppress=True)
 
-dtrnimg = 'CIFAR10/trn_img'
-dtrnlab = 'CIFAR10/trn_lab'
+np.set_printoptions(precision=5, suppress=True)
 
+# Data paths
+dtrnimg = './CIFAR10/trn_img'
+dtrnlab = './CIFAR10/trn_lab'
+
+# Create output directories
+os.makedirs('./CIFAR10/trn_img_f', exist_ok=True)
+os.makedirs('./CIFAR10/trn_lab_f', exist_ok=True)
+
+# Get file lists
 ids = os.listdir(dtrnimg)
 idtri_f = [os.path.join(dtrnimg, image_id) for image_id in ids]
-print(idtri_f)
+print("Image files:", idtri_f)
 
-ids = os.listdir(dtrnlab)
-idtrl_f = [os.path.join(dtrnlab, image_id) for image_id in ids]
-print(idtrl_f)
+ids_lab = os.listdir(dtrnlab)
+idtrl_f = [os.path.join(dtrnlab, label_id) for label_id in ids_lab]
+print("Label files:", idtrl_f)
 
-#path on the computer where the models are stored
-modpth = 'CIFAR10/models/crs5/'
+# Model paths
+modpth = './CIFAR10/models/crs5/'
 
 encf = []
 decf = []
 for p in range(len(ids)):
-    enc = modpth + '/' + str(p) + '/bst_enc.pth'
-    dec = modpth + '/' + str(p) + '/bst_dec.pth'
+    enc = os.path.join(modpth, str(p), 'bst_enc.pth')
+    dec = os.path.join(modpth, str(p), 'bst_dec.pth')
     encf.append(enc)
     decf.append(dec)
-    #print(enc)
-    #print(dec)
-    #print()
 
+# Process each fold
 for m in range(len(idtri_f)):
-    print(m)
+    print(f"\n=== Processing fold {m} ===")
+    
+    # Load data
     trnimgfile = idtri_f[m]
     trnlabfile = idtrl_f[m]
-    print(trnimgfile)
-    print(trnlabfile)
+    print(f"Loading: {trnimgfile}")
+    print(f"Loading: {trnlabfile}")
+    
     dec_x = np.loadtxt(trnimgfile) 
     dec_y = np.loadtxt(trnlabfile)
 
-    print('train imgs before reshape ',dec_x.shape) #(44993, 3072) 45500, 3072)
-    print('train labels ',dec_y.shape) #(44993,) (45500,)
+    print('Images before reshape:', dec_x.shape)
+    print('Labels:', dec_y.shape)
 
-    dec_x = dec_x.reshape(dec_x.shape[0],3,32,32)
-
-    print('decy ',dec_y.shape)
-    print(collections.Counter(dec_y))
+    # Reshape and normalize
+    dec_x = dec_x.reshape(dec_x.shape[0], 3, 32, 32)
+    dec_x = (dec_x - 127.5) / 127.5  # Normalize to [-1, 1]
     
-    print('train imgs after reshape ',dec_x.shape) #(45000,3,32,32)
+    print('Class distribution:', collections.Counter(dec_y))
+    print('Images after reshape:', dec_x.shape)
 
-    classes = ('plane', 'car', 'bird', 'cat',
-           'deer', 'dog', 'frog', 'horse', 'ship', 'truck')
+    classes = ('plane', 'car', 'bird', 'cat', 'deer', 
+               'dog', 'frog', 'horse', 'ship', 'truck')
     
-    #generate some images 
-    train_on_gpu = torch.cuda.is_available()
+    # Load models
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}")
     
     path_enc = encf[m]
     path_dec = decf[m]
 
+    if not os.path.exists(path_enc) or not os.path.exists(path_dec):
+        print(f"Model files not found: {path_enc}, {path_dec}")
+        continue
+
     encoder = Encoder(args)
-    encoder.load_state_dict(torch.load(path_enc), strict=False)
+    encoder.load_state_dict(torch.load(path_enc, map_location=device))
     encoder = encoder.to(device)
 
     decoder = Decoder(args)
-    decoder.load_state_dict(torch.load(path_dec), strict=False)
+    decoder.load_state_dict(torch.load(path_dec, map_location=device))
     decoder = decoder.to(device)
 
     encoder.eval()
     decoder.eval()
 
-    #imbal = [4500, 2000, 1000, 800, 600, 500, 400, 250, 150, 80]
+    # Define imbalance ratios (target samples per class)
     imbal = [4000, 2000, 1000, 750, 500, 350, 200, 100, 60, 40]
 
     resx = []
     resy = []
 
-    for i in range(1,10):
+    # Generate samples for classes 1-9 (class 0 already has enough samples)
+    for i in range(1, 10):
+        print(f"\nProcessing class {i} ({classes[i]})...")
+        
         xclass_orig, yclass = biased_get_class1(i)
-        print(xclass_orig.shape)
-        print(yclass[0])
+        
+        if len(xclass_orig) == 0:
+            print(f"No samples found for class {i}")
+            continue
             
-        #encode xclass to feature space
-        xclass = torch.Tensor(xclass_orig)
-        xclass = xclass.to(device)
-        xclass_encoded = encoder(xclass)
-        print(xclass_encoded.shape)
+        print(f"Original samples: {xclass_orig.shape}")
+        print(f"Class label: {yclass[0]}")
             
-        xclass_encoded = xclass_encoded.detach().cpu().numpy()
+        # Encode to latent space
+        with torch.no_grad():
+            xclass = torch.Tensor(xclass_orig).to(device)
+            xclass_encoded = encoder(xclass)
+            xclass_encoded = xclass_encoded.detach().cpu().numpy()
+        
+        print(f"Encoded shape: {xclass_encoded.shape}")
+        
+        # Calculate number of samples to generate
         n = imbal[0] - imbal[i]
-        xsamp, ysamp = G_SM1(xclass_encoded,yclass,n,i)
-        print(xsamp.shape) #(4500, 600)
-        print(len(ysamp)) #4500
+        if n <= 0:
+            continue
+            
+        print(f"Generating {n} samples...")
+        
+        # Generate SMOTE samples in latent space
+        xsamp, ysamp = G_SM1(xclass_encoded, yclass, n, i)
+        print(f"SMOTE samples shape: {xsamp.shape}")
+        print(f"SMOTE labels: {len(ysamp)}")
+        
         ysamp = np.array(ysamp)
-        print(ysamp.shape) #4500   
     
-        """to generate samples for resnet"""   
-        xsamp = torch.Tensor(xsamp)
-        xsamp = xsamp.to(device)
-        #xsamp = xsamp.view(xsamp.size()[0], xsamp.size()[1], 1, 1)
-        #print(xsamp.size()) #torch.Size([10, 600, 1, 1])
-        ximg = decoder(xsamp)
-
-        ximn = ximg.detach().cpu().numpy()
-        print(ximn.shape) #(4500, 3, 32, 32)
-        #ximn = np.expand_dims(ximn,axis=1)
-        print(ximn.shape) #(4500, 3, 32, 32)
+        # Decode to image space
+        with torch.no_grad():
+            xsamp_tensor = torch.Tensor(xsamp).to(device)
+            ximg = decoder(xsamp_tensor)
+            ximn = ximg.detach().cpu().numpy()
+        
+        print(f"Generated images shape: {ximn.shape}")
+        
         resx.append(ximn)
         resy.append(ysamp)
-        #print('resx ',resx.shape)
-        #print('resy ',resy.shape)
-        #print()
 
-        # Save some of the original and generated images
-        if i == 1: # Only do this for the first class for demonstration
-            print("Saving original and generated images...")
-            for j in range(5):
-                # Save original image
-                original_image = np.squeeze(xclass_orig[j])
+        # Save some sample images for verification
+        if i == 1:  # Only for first minority class
+            print("Saving sample images...")
+            for j in range(min(5, len(xclass_orig), len(ximn))):
+                # Original image
+                original_image = xclass_orig[j]
                 save_image_from_array(original_image, f"original_class_{i}_img_{j}.png")
 
-                # Save generated image
-                generated_image = np.squeeze(ximn[j])
+                # Generated image
+                generated_image = ximn[j]
                 save_image_from_array(generated_image, f"generated_class_{i}_img_{j}.png")
     
+    if len(resx) == 0:
+        print("No samples were generated!")
+        continue
+        
+    # Combine all generated samples
     resx1 = np.vstack(resx)
     resy1 = np.hstack(resy)
-    #print(resx1.shape) #(34720, 3, 32, 32)
-    #resx1 = np.squeeze(resx1)
-    print(resx1.shape) #(34720, 3, 32, 32)
-    print(resy1.shape) #(34720,)
-
-    resx1 = resx1.reshape(resx1.shape[0],-1)
-    print(resx1.shape) #(34720, 3072)
     
-    dec_x1 = dec_x.reshape(dec_x.shape[0],-1)
-    print('decx1 ',dec_x1.shape)
-    combx = np.vstack((resx1,dec_x1))
-    comby = np.hstack((resy1,dec_y))
+    print(f"Total generated samples: {resx1.shape}")
+    print(f"Total generated labels: {resy1.shape}")
 
-    print(combx.shape) #(45000, 3, 32, 32)
-    print(comby.shape) #(45000,)
-
-    ifile = 'CIFAR10/trn_img_f/' + \
-        str(m) + '_trn_img.txt'
-    np.savetxt(ifile, combx)
+    # Flatten images for saving
+    resx1 = resx1.reshape(resx1.shape[0], -1)
+    print(f"Flattened generated samples: {resx1.shape}")
     
-    lfile = 'CIFAR10/trn_lab_f/' + \
-        str(m) + '_trn_lab.txt'
-    np.savetxt(lfile,comby) 
-    print()
+    # Denormalize back to [0, 255] for saving
+    resx1 = ((resx1 + 1) * 127.5).astype(np.uint8)
+    
+    # Prepare original data
+    dec_x1 = dec_x.reshape(dec_x.shape[0], -1)
+    dec_x1 = ((dec_x1 + 1) * 127.5).astype(np.uint8)
+    
+    print(f"Original data shape: {dec_x1.shape}")
+    
+    # Combine original and generated data
+    combx = np.vstack((resx1, dec_x1))
+    comby = np.hstack((resy1, dec_y))
+
+    print(f"Combined data shape: {combx.shape}")
+    print(f"Combined labels shape: {comby.shape}")
+    print(f"Final class distribution: {collections.Counter(comby)}")
+
+    # Save combined data
+    ifile = os.path.join('./CIFAR10/trn_img_f', f'{m}_trn_img.txt')
+    lfile = os.path.join('./CIFAR10/trn_lab_f', f'{m}_trn_lab.txt')
+    
+    np.savetxt(ifile, combx, fmt='%d')
+    np.savetxt(lfile, comby, fmt='%d')
+    
+    print(f"Saved to: {ifile}")
+    print(f"Saved to: {lfile}")
 
 t1 = time.time()
-print('final time(min): {:.2f}'.format((t1 - t0)/60))
+print(f'\nTotal execution time: {(t1 - t0)/60:.2f} minutes')
+print("Sample generation completed successfully!")
