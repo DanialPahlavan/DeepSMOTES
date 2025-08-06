@@ -6,6 +6,7 @@ import torch.nn as nn
 import numpy as np
 from sklearn.neighbors import NearestNeighbors
 import os
+from save_images import save_image_from_array
 print(torch.version.cuda) #10.1
 import time
 t0 = time.time()
@@ -155,8 +156,8 @@ def G_SM1(X, y,n_to_sample,cl):
 #############################################################################
 np.printoptions(precision=5,suppress=True)
 
-dtrnimg = '.../0_trn_img.txt'
-dtrnlab = '.../0_trn_lab.txt'
+dtrnimg = 'MNIST/trn_img'
+dtrnlab = 'MNIST/trn_lab'
 
 ids = os.listdir(dtrnimg)
 idtri_f = [os.path.join(dtrnimg, image_id) for image_id in ids]
@@ -167,7 +168,7 @@ idtrl_f = [os.path.join(dtrnlab, image_id) for image_id in ids]
 print(idtrl_f)
 
 #path on the computer where the models are stored
-modpth = '.../MNIST/models/crs5/'
+modpth = 'MNIST/models/crs5/'
 
 encf = []
 decf = []
@@ -180,7 +181,7 @@ for p in range(5):
     #print(dec)
     #print()
 
-for m in range(5):
+for m in range(len(idtri_f)):
     print(m)
     trnimgfile = idtri_f[m]
     trnlabfile = idtrl_f[m]
@@ -227,19 +228,19 @@ for m in range(5):
     resy = []
 
     for i in range(1,10):
-        xclass, yclass = biased_get_class1(i)
-        print(xclass.shape) #(500, 3, 32, 32)
-        print(yclass[0]) #(500,)
+        xclass_orig, yclass = biased_get_class1(i)
+        print(xclass_orig.shape)
+        print(yclass[0])
             
         #encode xclass to feature space
-        xclass = torch.Tensor(xclass)
+        xclass = torch.Tensor(xclass_orig)
         xclass = xclass.to(device)
-        xclass = encoder(xclass)
-        print(xclass.shape) #torch.Size([500, 600])
+        xclass_encoded = encoder(xclass)
+        print(xclass_encoded.shape)
             
-        xclass = xclass.detach().cpu().numpy()
+        xclass_encoded = xclass_encoded.detach().cpu().numpy()
         n = imbal[0] - imbal[i]
-        xsamp, ysamp = G_SM1(xclass,yclass,n,i)
+        xsamp, ysamp = G_SM1(xclass_encoded,yclass,n,i)
         print(xsamp.shape) #(4500, 600)
         print(len(ysamp)) #4500
         ysamp = np.array(ysamp)
@@ -261,6 +262,18 @@ for m in range(5):
         #print('resx ',resx.shape)
         #print('resy ',resy.shape)
         #print()
+
+        # Save some of the original and generated images
+        if i == 1: # Only do this for the first class for demonstration
+            print("Saving original and generated images...")
+            for j in range(5):
+                # Save original image
+                original_image = np.squeeze(xclass_orig[j])
+                save_image_from_array(original_image, f"original_class_{i}_img_{j}.png")
+
+                # Save generated image
+                generated_image = np.squeeze(ximn[j])
+                save_image_from_array(generated_image, f"generated_class_{i}_img_{j}.png")
     
     resx1 = np.vstack(resx)
     resy1 = np.hstack(resy)
@@ -280,46 +293,14 @@ for m in range(5):
     print(combx.shape) #(45000, 3, 32, 32)
     print(comby.shape) #(45000,)
 
-    ifile = '.../MNIST/trn_img_f/' + \
+    ifile = 'MNIST/trn_img_f/' + \
         str(m) + '_trn_img.txt'
     np.savetxt(ifile, combx)
     
-    lfile = '.../MNIST/trn_lab_f/' + \
+    lfile = 'MNIST/trn_lab_f/' + \
         str(m) + '_trn_lab.txt'
     np.savetxt(lfile,comby) 
     print()
 
 t1 = time.time()
 print('final time(min): {:.2f}'.format((t1 - t0)/60))
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-

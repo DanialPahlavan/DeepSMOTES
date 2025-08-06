@@ -22,7 +22,7 @@ args['n_z'] = 300 #600     # number of dimensions in latent space.
 args['sigma'] = 1.0        # variance in n_z
 args['lambda'] = 0.01      # hyper param for weight of discriminator loss
 args['lr'] = 0.0002        # learning rate for Adam optimizer .000
-args['epochs'] = 200       # how many epochs to run for
+args['epochs'] = 50       # how many epochs to run for
 args['batch_size'] = 100   # batch size for SGD
 args['save'] = True        # save weights at each epoch of training if True
 args['train'] = True       # train networks if True, else load networks from
@@ -179,8 +179,8 @@ def G_SM(X, y,n_to_sample,cl):
 #directories.  Here, for illustration, we use only 1 training and 1 label
 #file (e.g., '.../0_trn_img.txt' and '.../0_trn_lab.txt').
 
-dtrnimg = '.../MNIST/trn_img/'
-dtrnlab = '.../MNIST/trn_lab/'
+dtrnimg = './MNIST/trn_img/'
+dtrnlab = './MNIST/trn_lab/'
 
 ids = os.listdir(dtrnimg)
 idtri_f = [os.path.join(dtrnimg, image_id) for image_id in ids]
@@ -343,9 +343,9 @@ for i in range(len(ids)):
             #necessary for illustration purposes
             if train_loss < best_loss:
                 print('Saving..')
-                path_enc = '.../MNIST/models/crs5/' \
+                path_enc = './MNIST/models/crs5/' \
                     + str(i) + '/bst_enc.pth'
-                path_dec = '.../MNIST/models/crs5/' \
+                path_dec = './MNIST/models/crs5/' \
                     + str(i) + '/bst_dec.pth'
              
                 torch.save(encoder.state_dict(), path_enc)
@@ -356,9 +356,9 @@ for i in range(len(ids)):
         
         #in addition, store the final model (may not be the best) for
         #informational purposes
-        path_enc = '.../MNIST/models/crs5/' \
+        path_enc = './MNIST/models/crs5/' \
             + str(i) + '/f_enc.pth'
-        path_dec = '.../MNIST/models/crs5/' \
+        path_dec = './MNIST/models/crs5/' \
             + str(i) + '/f_dec.pth'
         print(path_enc)
         print(path_dec)
@@ -371,4 +371,3 @@ for i in range(len(ids)):
  
 t4 = time.time()
 print('final time(min): {:.2f}'.format((t4 - t3)/60))
-
